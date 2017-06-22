@@ -1,37 +1,60 @@
 #![cfg_attr(test, feature(test))]
 #![feature(step_by)]
 
+#![feature(associated_consts)]
+
+extern crate core;
+
 extern crate rand;
+extern crate rayon;
+extern crate simd;
+extern crate num_cpus;
 
-type NumType = f64;
 
-const ARRAY_SIZE: usize = 10000;
+use core::ptr;
+
+use rayon::prelude::*;
+
+use simd::x86::avx::{f64x4, f32x8};
+
+
+type NumType = f32;
+
+const ARRAY_SIZE: usize = 50000;
 const STRIDE: usize = 1;
 const S: NumType = 3.5 as NumType;
 
-type ArrayType = [NumType; ARRAY_SIZE];
-
-
-fn random_array() -> ArrayType {
-    let mut ret = [0 as NumType; ARRAY_SIZE];
-    for i in 0..ARRAY_SIZE {
-        ret[i] = rand::random::<NumType>();
-        //println!("{:?}", ret[i]);
-    }
-    ret
+fn random_array() -> Vec<NumType> {
+    (0..ARRAY_SIZE).map(|_| rand::random::<NumType>()).collect()
 }
 
-
+#[allow(unused)]
 fn main() {
-    let mut res = [0 as NumType; ARRAY_SIZE];
+    let mut res = vec![0 as NumType; ARRAY_SIZE];
     let a = random_array();
     let b = random_array();
     let c = random_array();
 
+    /*
     copy(&a, &mut res);
     add(&mut res, &a, &b);
     striad(&mut res, &a, &b, S);
     vtriad(&mut res, &a, &b, &c);
+    */
+    /*
+    vtriad_itertools(&mut res, &a, &b, &c);
+    for i in 0..ARRAY_SIZE {
+        println!("{}: {} * {} + {} = {}", i, a[i], c[i], b[i], res[i]);
+    }
+    */
+    //vtriad_rayon(&mut res, &a, &b, &c);
+
+    vtriad_rayon(&mut res, &a, &b, &c);
+    //vtriad_itertools(&mut res, &a, &b, &c);
+    //vtriad_simd_f64(&mut res, &a, &b, &c);
+    for i in 0..ARRAY_SIZE {
+        println!("{}: {} * {} + {} = {}", i, a[i], c[i], b[i], res[i]);
+    }
 }
 
 // https://doc.rust-lang.org/std/primitive.slice.html#method.copy_from_slice
@@ -56,6 +79,15 @@ fn add<T>(result: &mut [T], a: &[T], b: &[T])
 }
 
 #[inline]
+fn add_itertools<T>(result: &mut Vec<T>, a: &[T], b: &[T])
+    where T: std::marker::Copy + std::ops::Add<Output=T>
+{
+    let r = a.iter().zip(b).map(|(x, y)| *x + *y);
+    result.clear();
+    result.extend(r);
+}
+
+#[inline]
 fn striad<T>(result: &mut [T], a: &[T], b: &[T], s: T)
     where T: std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>
 {
@@ -77,6 +109,206 @@ fn vtriad<T>(result: &mut [T], a: &[T], b: &[T], c: &[T])
     }
 }
 
+#[inline]
+fn vtriad_itertools<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
+    where T: std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>
+{
+    let r = a.iter().zip(b).zip(c).map(|((&x, &y), &z)| x * z + y);
+
+    let result_ptr = result.as_mut_ptr();
+    let result_slice = result.as_mut_slice();
+
+    let end = r.fold(0, |index, item| { unsafe {ptr::write(result_ptr.offset(index as isize), item) }; index + 1});
+    //let end = r.fold(0, |index, item| { result_slice[index] = item; index + 1});
+
+    assert_eq!(end, result_slice.len());
+
+    /*
+    // slower but cleaner
+    result.clear();
+    result.extend(r);
+    */
+}
+
+#[inline]
+fn vtriad_rayon<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
+    where T: Sync + Send + std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>
+{
+    let r = a.par_iter().zip(b).zip(c).map(|((&x, &y), &z)| x * z + y);
+    result.clear();
+    result.par_extend(r);
+
+    //assert_eq!(end, result.len() - 1);
+}
+
+#[inline]
+fn vtriad_simd_f64(result: &mut Vec<f64>, a: &[f64], b: &[f64], c: &[f64])
+{
+    const CHUNK_SIZE: usize = 4;
+    type SimdType = f64x4;
+
+    let len = result.len();
+    assert_eq!(len % CHUNK_SIZE, 0);
+
+    /*
+    let simd = a.chunks(CHUNK_SIZE).zip(b.chunks(CHUNK_SIZE)).zip(c.chunks(CHUNK_SIZE)).map(|((x, y), z)| unsafe {(
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((x as *const [Num]) as *const [Num; CHUNK_SIZE])),
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((y as *const [Num]) as *const [Num; CHUNK_SIZE])),
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((z as *const [Num]) as *const [Num; CHUNK_SIZE]))
+    )});
+    let r = simd.map(|(x, y, z)| x * z + y);
+    */
+
+    let simd = a.chunks(CHUNK_SIZE).zip(b.chunks(CHUNK_SIZE)).zip(c.chunks(CHUNK_SIZE)).map(|((x, y), z)|
+        (SimdType::load(x, 0), SimdType::load(y, 0), SimdType::load(z, 0)));
+    let r = simd.map(|(x, y, z)| x * z + y);
+
+    /*
+    let result_ptr = result.as_mut_ptr();
+    let result_slice = result.as_mut_slice();
+
+    let end = r.fold(0, |index, item| {
+        unsafe {
+            ptr::copy((&item as *const SimdType) as *const Num, result_ptr.offset(index as isize), CHUNK_SIZE)
+        };
+        index + CHUNK_SIZE});
+    */
+    let end = r.fold(0, |index, item| { item.store(result.as_mut_slice(), index); index + CHUNK_SIZE});
+
+
+    assert_eq!(end, len);
+}
+
+#[inline]
+fn vtriad_simd_f32(result: &mut Vec<f32>, a: &[f32], b: &[f32], c: &[f32])
+{
+    const CHUNK_SIZE: usize = 8;
+    type SimdType = f32x8;
+    type Num = f32;
+
+    let len = result.len();
+    assert_eq!(len % CHUNK_SIZE, 0);
+
+    /*
+    let simd = a.chunks(CHUNK_SIZE).zip(b.chunks(CHUNK_SIZE)).zip(c.chunks(CHUNK_SIZE)).map(|((x, y), z)| unsafe {(
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((x as *const [Num]) as *const [Num; CHUNK_SIZE])),
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((y as *const [Num]) as *const [Num; CHUNK_SIZE])),
+        std::mem::transmute::<[Num; CHUNK_SIZE], SimdType>(*((z as *const [Num]) as *const [Num; CHUNK_SIZE]))
+    )});
+    */
+
+    let simd = a.chunks(CHUNK_SIZE).zip(b.chunks(CHUNK_SIZE)).zip(c.chunks(CHUNK_SIZE)).map(|((x, y), z)|
+        (SimdType::load(x, 0), SimdType::load(y, 0), SimdType::load(z, 0)));
+
+    let r = simd.map(|(x, y, z)| x * z + y);
+
+    ///*
+    let result_ptr = result.as_mut_ptr();
+    let result_slice = result.as_mut_slice();
+
+    let end = r.fold(0, |index, item| {
+        unsafe {
+            ptr::copy((&item as *const SimdType) as *const Num, result_ptr.offset(index as isize), CHUNK_SIZE)
+        };
+        index + CHUNK_SIZE});
+    //*/
+    //let end = r.fold(0, |index, item| { item.store(result_slice, index); index + CHUNK_SIZE});
+
+
+    assert_eq!(end, len);
+}
+
+trait SimdItem {
+    type Elem: std::marker::Sized;
+
+    #[inline]
+    fn store (self, array: &mut [Self::Elem], idx: usize) where Self: core::marker::Sized;
+}
+
+impl SimdItem for f64x4 {
+    type Elem = f64;
+
+    #[inline]
+    fn store (self, array: &mut [f64], idx: usize) {
+        self.store(array, idx);
+    }
+}
+
+impl SimdItem for f32x8 {
+    type Elem = f32;
+
+    fn store (self, array: &mut [f32], idx: usize) {
+        self.store(array, idx);
+    }
+}
+
+trait SimdCapable where Self: core::marker::Sized {
+    type SimdType: SimdItem<Elem=Self> + std::marker::Copy + std::ops::Add<Output=Self::SimdType> + std::ops::Mul<Output=Self::SimdType>;
+    const CHUNK_SIZE: usize;
+    type ArrayType;
+
+    #[inline]
+    fn load (array: &[Self], idx: usize) -> Self::SimdType where Self: core::marker::Sized;
+}
+
+impl SimdCapable for f64 {
+    type SimdType = f64x4;
+    type ArrayType = [f64; 4];
+    const CHUNK_SIZE: usize = 4;
+
+    #[inline]
+    fn load (array: &[Self], idx: usize) -> Self::SimdType {
+        Self::SimdType::load(array, idx)
+    }
+}
+
+impl SimdCapable for f32 {
+    type SimdType = f32x8;
+    type ArrayType = [f32; 8];
+    const CHUNK_SIZE: usize = 8;
+
+    #[inline]
+    fn load (array: &[Self], idx: usize) -> Self::SimdType {
+        Self::SimdType::load(array, idx)
+    }
+}
+
+
+#[inline]
+fn vtriad_simd<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
+    where T: SimdCapable + std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>,
+{
+    let len = result.len();
+    assert_eq!(len % T::CHUNK_SIZE, 0);
+
+    let simd = a.chunks(T::CHUNK_SIZE)
+        .zip(b.chunks(T::CHUNK_SIZE))
+        .zip(c.chunks(T::CHUNK_SIZE))
+        .map(|((x, y), z)| (T::load(x, 0), T::load(y, 0), T::load(z, 0)));
+
+    let r = simd.map(|(x, y, z)| x * z + y);
+
+
+    let result_ptr = result.as_mut_ptr();
+
+    let end = r.fold(0, |index, item| {
+        unsafe {
+            ptr::copy((&item as *const T::SimdType) as *const T, result_ptr.offset(index as isize), T::CHUNK_SIZE)
+        };
+        index + T::CHUNK_SIZE
+    });
+    /*
+    let result_slice = result.as_mut_slice();
+
+    let end = r.fold(0, |index, item| {
+        item.store(result_slice, index);
+        index + T::CHUNK_SIZE
+    });
+    */
+    assert_eq!(end, len);
+}
+
+#[allow(unused)]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,6 +340,15 @@ mod tests {
     }
 
     #[test]
+    fn test_add_itertools() {
+        let mut result = vec![0; ARRAY_SIZE];
+        let a = [0, 1, 2, 3, 4];
+        let b = [5, 4, 3, 2, 1];
+        add_itertools(&mut result, &a, &b);
+        array_equal(&result, &[5; 5]);
+    }
+
+    #[test]
     fn test_striad() {
         let mut result = [0; 5];
         let a = [0, 1, 2, 3, 4];
@@ -126,6 +367,46 @@ mod tests {
         array_equal(&result, &[5, 5, 7, 11, 17]);
     }
 
+    #[test]
+    fn test_vtriad_itertools() {
+        let mut result = vec![0; 5];
+        let a = [0, 1, 2, 3, 4];
+        let b = [5, 4, 3, 2, 1];
+        let c = [0, 1, 2, 3, 4];
+        vtriad_itertools(&mut result, &a, &b, &c);
+        array_equal(&result, &[5, 5, 7, 11, 17]);
+
+        let mut result_iter = vec![0 as NumType; ARRAY_SIZE];
+        let mut result_std = vec![0 as NumType; ARRAY_SIZE];
+
+        let x = random_array();
+        let y = random_array();
+        let z = random_array();
+        vtriad_itertools(&mut result_iter, &x, &y, &z);
+        vtriad(&mut result_std, &x, &y, &z);
+        array_equal(&result_std, &result_iter);
+    }
+
+    #[test]
+    fn test_vtriad_rayon() {
+        let mut result = vec![0; 5];
+        let a = [0, 1, 2, 3, 4];
+        let b = [5, 4, 3, 2, 1];
+        let c = [0, 1, 2, 3, 4];
+        vtriad_rayon(&mut result, &a, &b, &c);
+        array_equal(&result, &[5, 5, 7, 11, 17]);
+    }
+
+    #[test]
+    fn test_vtriad_simd_f64() {
+        let mut result = vec![0.; 8];
+        let a = [0., 1., 2., 3., 4., 5., 6., 7.];
+        let b = [5., 4., 3., 2., 1., 0., 1., 2.];
+        let c = [0., 1., 2., 3., 4., 5., 6., 7.];
+        vtriad_simd_f64(&mut result, &a, &b, &c);
+        array_equal(&result, &[5., 5., 7., 11., 17., 25., 37., 51.]);
+    }
+
     #[bench]
     fn bench_copy(bencher: &mut test::Bencher) {
         let mut dst = random_array();
@@ -137,7 +418,7 @@ mod tests {
 
     #[bench]
     fn bench_add(bencher: &mut test::Bencher) {
-        let mut res = [0 as NumType; ARRAY_SIZE];
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
         let a = random_array();
         let b = random_array();
         bencher.iter(|| {
@@ -146,8 +427,18 @@ mod tests {
     }
 
     #[bench]
+    fn bench_add_itertools(bencher: &mut test::Bencher) {
+        let mut result = vec![0 as NumType; ARRAY_SIZE];
+        let a = random_array();
+        let b = random_array();
+        bencher.iter(|| {
+            add_itertools(&mut result, &a, &b);
+        });
+    }
+
+    #[bench]
     fn bench_striad(bencher: &mut test::Bencher) {
-        let mut res = [0 as NumType; ARRAY_SIZE];
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
         let a = random_array();
         let b = random_array();
         bencher.iter(|| {
@@ -157,12 +448,69 @@ mod tests {
 
     #[bench]
     fn bench_vtriad(bencher: &mut test::Bencher) {
-        let mut res = [0 as NumType; ARRAY_SIZE];
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
         let a = random_array();
         let b = random_array();
         let c = random_array();
         bencher.iter(|| {
             vtriad(&mut res, &a, &b, &c);
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_itertools(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
+        let a = random_array();
+        let b = random_array();
+        let c = random_array();
+        vtriad_itertools(&mut res, &a, &b, &c);
+        res[ARRAY_SIZE - 1] += 1.0; // If res of the method is not used there is no code emitted
+        bencher.iter(|| {
+            vtriad_itertools(&mut res, &a, &b, &c);
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_rayon(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
+        let a = random_array();
+        let b = random_array();
+        let c = random_array();
+        bencher.iter(|| {
+            vtriad_rayon(&mut res, &a, &b, &c)
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_simd(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
+        let a = random_array();
+        let b = random_array();
+        let c = random_array();
+        bencher.iter(|| {
+            vtriad_simd(&mut res, &a, &b, &c)
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_simd_f64(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as f64; ARRAY_SIZE];
+        let a = (0..ARRAY_SIZE).map(|_| rand::random::<f64>()).collect::<Vec<_>>();
+        let b = (0..ARRAY_SIZE).map(|_| rand::random::<f64>()).collect::<Vec<_>>();
+        let c = (0..ARRAY_SIZE).map(|_| rand::random::<f64>()).collect::<Vec<_>>();
+        bencher.iter(|| {
+            vtriad_simd_f64(&mut res, &a, &b, &c)
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_simd_f32(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as f32; ARRAY_SIZE];
+        let a = (0..ARRAY_SIZE).map(|_| rand::random::<f32>()).collect::<Vec<_>>();
+        let b = (0..ARRAY_SIZE).map(|_| rand::random::<f32>()).collect::<Vec<_>>();
+        let c = (0..ARRAY_SIZE).map(|_| rand::random::<f32>()).collect::<Vec<_>>();
+        bencher.iter(|| {
+            vtriad_simd_f32(&mut res, &a, &b, &c)
         });
     }
 }
