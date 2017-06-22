@@ -134,9 +134,20 @@ fn vtriad_itertools<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
 fn vtriad_rayon<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
     where T: Sync + Send + std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>
 {
+    /*
     let r = a.par_iter().zip(b).zip(c).map(|((&x, &y), &z)| x * z + y);
     result.clear();
     result.par_extend(r);
+    */
+    ///*
+    let r = result.par_iter_mut().zip(a).zip(b).zip(c);
+
+    r.for_each(|(((r, &x), &y), &z)| {
+        unsafe {
+            ptr::write(r as *mut T, x * z + y)
+        };
+    });
+    //*/
 }
 
 trait SimdItem {
@@ -158,6 +169,7 @@ impl SimdItem for f64x4 {
 impl SimdItem for f32x8 {
     type Elem = f32;
 
+    #[inline]
     fn store (self, array: &mut [f32], idx: usize) {
         self.store(array, idx);
     }
@@ -196,7 +208,7 @@ impl SimdCapable for f32 {
 
 
 #[inline]
-fn vtriad_simd<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
+fn vtriad_simd<T>(result: &mut [T], a: &[T], b: &[T], c: &[T])
     where T: SimdCapable + std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>,
 {
     let len = result.len();
@@ -227,6 +239,29 @@ fn vtriad_simd<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
     });
     */
     assert_eq!(end, len);
+}
+
+#[inline]
+fn vtriad_simd_rayon<T>(result: &mut [T], a: &[T], b: &[T], c: &[T])
+    where T: SimdCapable + Sync + Send + std::marker::Copy + std::ops::Add<Output=T> + std::ops::Mul<Output=T>,
+            T::SimdType : Send
+{
+    let len = result.len();
+    assert_eq!(len % T::CHUNK_SIZE, 0);
+
+    let simd = result.par_chunks_mut(T::CHUNK_SIZE)
+        .zip(a.par_chunks(T::CHUNK_SIZE))
+        .zip(b.par_chunks(T::CHUNK_SIZE))
+        .zip(c.par_chunks(T::CHUNK_SIZE))
+        .map(|(((r, x), y), z)| (r, T::load(x, 0), T::load(y, 0), T::load(z, 0)));
+
+    //let r = simd.map(|(r, x, y, z)| (r, x * z + y));
+
+    simd.for_each(|(r, x, y, z)| {
+        unsafe {
+            ptr::copy((&(x * z + y) as *const T::SimdType) as *const T, r.as_mut_ptr(), T::CHUNK_SIZE)
+        };
+    });
 }
 
 #[allow(unused)]
@@ -328,12 +363,22 @@ mod tests {
         array_equal(&result, &[5., 5., 7., 11., 17., 25., 37., 51.]);
     }
 
-    #[bench]
+    #[test]
+    fn test_vtriad_simd_rayon() {
+        let mut result = vec![0.; 8];
+        let a = [0., 1., 2., 3., 4., 5., 6., 7.];
+        let b = [5., 4., 3., 2., 1., 0., 1., 2.];
+        let c = [0., 1., 2., 3., 4., 5., 6., 7.];
+        vtriad_simd_rayon(&mut result, &a, &b, &c);
+        array_equal(&result, &[5., 5., 7., 11., 17., 25., 37., 51.]);
+    }
+
+    //#[bench]
     fn bench_copy(bencher: &mut test::Bencher) {
         let mut dst = random_array();
         let src = random_array();
         bencher.iter(|| {
-            copy(&src, &mut dst);
+            test::black_box(copy(&src, &mut dst));
         });
     }
 
@@ -343,7 +388,7 @@ mod tests {
         let a = random_array();
         let b = random_array();
         bencher.iter(|| {
-            add(&mut res, &a, &b);
+            test::black_box(add(&mut res, &a, &b));
         });
     }
 
@@ -353,7 +398,7 @@ mod tests {
         let a = random_array();
         let b = random_array();
         bencher.iter(|| {
-            add_itertools(&mut result, &a, &b);
+            test::black_box(add_itertools(&mut result, &a, &b));
         });
     }
 
@@ -363,7 +408,7 @@ mod tests {
         let a = random_array();
         let b = random_array();
         bencher.iter(|| {
-            striad(&mut res, &a, &b, S);
+            test::black_box(striad(&mut res, &a, &b, S));
         });
     }
 
@@ -374,7 +419,7 @@ mod tests {
         let b = random_array();
         let c = random_array();
         bencher.iter(|| {
-            vtriad(&mut res, &a, &b, &c);
+            test::black_box(vtriad(&mut res, &a, &b, &c));
         });
     }
 
@@ -387,7 +432,7 @@ mod tests {
         vtriad_itertools(&mut res, &a, &b, &c);
         res[ARRAY_SIZE - 1] += 1.0; // If res of the method is not used there is no code emitted
         bencher.iter(|| {
-            vtriad_itertools(&mut res, &a, &b, &c);
+            test::black_box(vtriad_itertools(&mut res, &a, &b, &c));
         });
     }
 
@@ -398,18 +443,29 @@ mod tests {
         let b = random_array();
         let c = random_array();
         bencher.iter(|| {
-            vtriad_rayon(&mut res, &a, &b, &c)
+            test::black_box(vtriad_rayon(&mut res, &a, &b, &c));
         });
     }
 
-    #[bench]
+    //#[bench]
     fn bench_vtriad_simd(bencher: &mut test::Bencher) {
         let mut res = vec![0 as NumType; ARRAY_SIZE];
         let a = random_array();
         let b = random_array();
         let c = random_array();
         bencher.iter(|| {
-            vtriad_simd(&mut res, &a, &b, &c)
+            test::black_box(vtriad_simd(&mut res, &a, &b, &c));
+        });
+    }
+
+    #[bench]
+    fn bench_vtriad_simd_rayon(bencher: &mut test::Bencher) {
+        let mut res = vec![0 as NumType; ARRAY_SIZE];
+        let a = random_array();
+        let b = random_array();
+        let c = random_array();
+        bencher.iter(|| {
+            test::black_box(vtriad_simd_rayon(&mut res, &a, &b, &c));
         });
     }
 }
