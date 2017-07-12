@@ -7,4 +7,9 @@ authors = ["Markus Baur <markusb@selfnet.de>"]
 rand = ">=0.3"
 rayon = "*"
 simd = "*"
-num_cpus = "*"
+hwloc = "*"
+lazy_static = "*"
+cpuprofiler = "*"
+
+[profile.release]
+debug = true
