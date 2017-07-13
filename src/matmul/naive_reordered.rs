@@ -8,6 +8,8 @@ pub fn mult(A: &Matrix, B: &Matrix, C: &mut Matrix) {
     assert_eq!(A.rows, C.rows);
     assert_eq!(B.columns, C.columns);
 
+    C.reset();
+
     for i in 0..C.rows {
         for k in 0..A.columns {
             for j in 0..C.columns/4 {
