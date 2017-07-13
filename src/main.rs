@@ -48,7 +48,7 @@ fn main() {
 
     let a = Matrix::random(n, n);
     let b = Matrix::random(n, n);
-    let mut c = Matrix::random(n, n);
+    let mut c = Matrix::zero(n, n);
 
     PROFILER.lock().unwrap().start("/tmp/profile");
     for _ in 0..10 {

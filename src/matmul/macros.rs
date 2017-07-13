@@ -37,13 +37,19 @@ macro_rules! generate_tests {
 
             #[bench]
             fn bench_256x256_256x256(bencher: &mut test::Bencher) {
-                let a = Matrix::random(256, 256);
-                let b = Matrix::random(256, 256);
-                let mut c = Matrix::random(256, 256);
+                let n = 256;
+                let a = Matrix::random(n, n);
+                let b = Matrix::random(n, n);
+                let mut c = Matrix::zero(n, n);
 
                 bencher.iter(|| {
                     mult(&a, &b, &mut c);
                 });
+
+                //println!();
+                //println!("FLOP: {}", 2*n*n*n);
+                //println!("ns/iter: {}", bencher.summary.unwrap().mean);
+                //println!("FLOP/s: {}", 2*n*n*n as f64 / bencher.summary.unwrap().mean * 1_000_000_000 as f64)
             }
         }
     )
