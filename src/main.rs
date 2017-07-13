@@ -11,6 +11,7 @@
 extern crate lazy_static;
 extern crate hwloc;
 extern crate cpuprofiler;
+extern crate rayon;
 
 use cpuprofiler::PROFILER;
 
@@ -50,6 +51,8 @@ fn main() {
     let b = Matrix::random(n, n);
     let mut c = Matrix::zero(n, n);
 
+    rayon::initialize(rayon::Configuration::new());
+
     PROFILER.lock().unwrap().start("/tmp/profile");
     for _ in 0..10 {
         matmul::naive::mult(&a, &b, &mut c);
@@ -57,10 +60,13 @@ fn main() {
         matmul::naive_unchecked::mult(&a, &b, &mut c);
         matmul::naive_reordered::mult(&a, &b, &mut c);
         matmul::naive_simd::mult(&a, &b, &mut c);
+        matmul::naive_rayon::mult(&a, &b, &mut c);
+
     }
     PROFILER.lock().unwrap().stop();
 
     println!("{}", c[0]);
+
     //let mut res = vec![0 as NumType; ARRAY_SIZE];
     //let a = random_array();
     //let b = random_array();
