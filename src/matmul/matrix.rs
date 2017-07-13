@@ -10,15 +10,44 @@ use std::ops::{Index, IndexMut};
 
 use std::cmp::{PartialEq, Eq};
 
+/// A rust Matrix
+///
+/// This is a row major matrix!
+///
+/// # Properties
+/// ## Members
+/// This matrix consists of the following members:
+///
+/// rows:       usize       The number of rows
+/// columns:    usize       The number of columns
+/// data:       Vec<f64>    The data stored in this matrix
+///
+/// data is allocated on the heap because rust has a limit of 2MB on its stack.
+///
+/// ## Alignment
+/// If the matrix reports alignment via is_aligned(), data's content is aligned to 32 bytes and can
+/// be used as the f64x4 by simple pointer casting.
+///
+/// ## Methods
+/// This struct only implements methods to create, alter and index itself. Operations have to be
+/// implemented somewhere else.
+///
+/// # Examples
+///
+/// ```
+/// assert(Matrix::zero(4,4).is_aligned())
+/// assert(!(Matrix::zero(5,5).is_aligned()))
+/// ```
 #[derive(Debug, PartialEq)]
 pub struct Matrix {
-    pub data: Vec<f64>, // force heap allocation
     pub rows: usize,
     pub columns: usize,
     aligned: bool,
+    pub data: Vec<f64>, // force heap allocation
 }
 
 impl Matrix {
+    /// Create a new, unaligned matrix from the given parts
     pub fn new(rows: usize, columns: usize, data: Vec<f64>) -> Self {
         Self {
             rows: rows,
@@ -28,6 +57,10 @@ impl Matrix {
         }
     }
 
+    /// Create a new, aligned matrix
+    ///
+    /// data is of type Vec<f64x4> in order to ensure it is correctly aligned and is casted to
+    /// Vec<f64> during construction.
     pub fn new_aligned(rows: usize, columns: usize, data: Vec<f64x4>) -> Self {
 
         let vec = unsafe {
@@ -44,7 +77,9 @@ impl Matrix {
         }
     }
 
+    /// Create a zero matrix
     ///
+    /// This matrix is aligned if columns is a multiple of 4.
     ///
     pub fn zero(rows: usize, columns: usize) -> Self {
         if columns % 4 == 0 {
@@ -55,6 +90,12 @@ impl Matrix {
         }
     }
 
+    /// Create a "random" matrix
+    ///
+    /// This matrix is aligned if columns is a multiple of 4.
+    /// The data itself is not random but 0..rows*columns if not aligned and 0..rows * columns / 4
+    /// with each value occurring 4 times if aligned
+    ///
     pub fn random(rows: usize, columns: usize) -> Self {
         if columns % 4 == 0 {
             Self::new_aligned(rows, columns, (0..rows * columns / 4).map(|i| f64x4::splat(i as f64)).collect())
@@ -64,12 +105,14 @@ impl Matrix {
         }
     }
 
+    /// Reset all entries to zero
     pub fn reset(&mut self) {
         for v in &mut self.data {
             *v = 0.;
         }
     }
 
+    /// Check whether this matrix is aligned and can be used in simd pointer casts
     pub fn is_aligned(&self) -> bool {
         self.aligned
     }
