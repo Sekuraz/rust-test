@@ -6,6 +6,8 @@ use self::simd::x86::avx::f64x4;
 
 use std;
 
+use std::fmt;
+
 use std::ops::{Index, IndexMut};
 
 use std::cmp::{PartialEq, Eq};
@@ -38,7 +40,7 @@ use std::cmp::{PartialEq, Eq};
 /// assert(Matrix::zero(4,4).is_aligned())
 /// assert(!(Matrix::zero(5,5).is_aligned()))
 /// ```
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct Matrix {
     pub rows: usize,
     pub columns: usize,
@@ -220,5 +222,20 @@ impl IndexMut<(usize, usize)> for Matrix {
     #[inline]
     fn index_mut(&mut self, (row, column): (usize, usize)) -> &mut f64 {
         &mut self.data[row * self.columns + column]
+    }
+}
+
+impl fmt::Display for Matrix {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "{}", std::iter::repeat("-").take(self.columns * 14 + 3).collect::<String>())?;
+        self.data.chunks(self.columns).for_each(|row| {
+            write!(f, "| ");
+            for item in row {
+                write!(f, "{:>12}, ", item);
+            }
+            writeln!(f, "|");
+        });
+        writeln!(f, "{}", std::iter::repeat("-").take(self.columns * 14 + 3).collect::<String>())
+
     }
 }
