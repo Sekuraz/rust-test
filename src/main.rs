@@ -1,7 +1,8 @@
 #![cfg_attr(test, feature(test))]
-#![feature(step_by)]
 
-#![feature(associated_consts)]
+#![feature(iterator_step_by)]
+#![feature(iterator_for_each)]
+
 #![feature(drop_types_in_const)]
 #![feature(const_fn)]
 
@@ -44,28 +45,40 @@ fn random_array() -> Vec<NumType>
 
 #[allow(unused)]
 fn main() {
-
-    let n = 128 * 8;
+    let n = 128 * 16;
 
     let a = Matrix::random(n, n);
     let b = Matrix::random(n, n);
     let mut c = Matrix::zero(n, n);
 
+    let a_t = TileMatrix::from(a.clone());
+    let b_t = TileMatrix::from(b.clone());
+    let mut c_t = TileMatrix::from(c.clone());
+
     rayon::initialize(rayon::Configuration::new());
 
+    //#[cfg(release)] // otherwise the output does not reflect runtime
     PROFILER.lock().unwrap().start("/tmp/profile");
     for _ in 0..10 {
-        matmul::naive::mult(&a, &b, &mut c);
+        //matmul::naive::mult(&a, &b, &mut c); c.reset();
 
-        matmul::naive_unchecked::mult(&a, &b, &mut c);
-        matmul::naive_reordered::mult(&a, &b, &mut c);
-        matmul::naive_simd::mult(&a, &b, &mut c);
-        matmul::naive_rayon::mult(&a, &b, &mut c);
+        //matmul::naive_unchecked::mult(&a, &b, &mut c); c.reset();
+        //matmul::naive_reordered::mult(&a, &b, &mut c); c.reset();
+        matmul::naive_simd::mult(&a, &b, &mut c); c.reset();
+        //matmul::naive_rayon::mult(&a, &b, &mut c); c.reset();
+
+        matmul::blocked::mult(&a_t, &b_t, &mut c_t); c_t.reset();
 
     }
+    //#[cfg(release)] // otherwise the output does not reflect runtime
     PROFILER.lock().unwrap().stop();
 
+    let t: &Matrix = &c_t[0];
     println!("{}", c[0]);
+    println!("{}", t[0]);
+
+
+    //matmul::blocked::mult(&a, &b, &mut c);
 
     //let mut res = vec![0 as NumType; ARRAY_SIZE];
     //let a = random_array();
