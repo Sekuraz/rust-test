@@ -1,11 +1,10 @@
-extern crate core;
 
 extern crate rayon;
 extern crate simd;
 extern crate hwloc;
 
 use std;
-use self::core::ptr;
+use self::std::ptr;
 
 use self::rayon::prelude::*;
 
@@ -90,7 +89,7 @@ pub fn vtriad_itertools<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
     let result_ptr = result.as_mut_ptr();
     let result_slice = result.as_mut_slice();
 
-    let end = r.fold(0, |index, item| { unsafe {core::ptr::write(result_ptr.offset(index as isize), item) }; index + 1});
+    let end = r.fold(0, |index, item| { unsafe {ptr::write(result_ptr.offset(index as isize), item) }; index + 1});
     assert_eq!(end, result_slice.len());
 }
 
@@ -126,7 +125,7 @@ pub fn vtriad_rayon<T>(result: &mut Vec<T>, a: &[T], b: &[T], c: &[T])
 pub trait SimdItem {
     type Elem: std::marker::Sized;
 
-    fn store (self, array: &mut [Self::Elem], idx: usize) where Self: core::marker::Sized;
+    fn store (self, array: &mut [Self::Elem], idx: usize) where Self: std::marker::Sized;
 }
 
 impl SimdItem for f64x4 {
@@ -145,12 +144,12 @@ impl SimdItem for f32x8 {
     }
 }
 
-pub trait SimdCapable where Self: core::marker::Sized {
-    type SimdType: SimdItem<Elem=Self> + core::fmt::Debug + std::marker::Copy + std::ops::Add<Output=Self::SimdType> + std::ops::Mul<Output=Self::SimdType>;
+pub trait SimdCapable where Self: std::marker::Sized {
+    type SimdType: SimdItem<Elem=Self> + std::fmt::Debug + std::marker::Copy + std::ops::Add<Output=Self::SimdType> + std::ops::Mul<Output=Self::SimdType>;
     const CHUNK_SIZE: usize;
     type ArrayType;
 
-    fn load (array: &[Self], idx: usize) -> Self::SimdType where Self: core::marker::Sized;
+    fn load (array: &[Self], idx: usize) -> Self::SimdType where Self: std::marker::Sized;
 }
 
 impl SimdCapable for f64 {
@@ -191,7 +190,7 @@ pub fn vtriad_simd<T>(result: &mut [T], a: &[T], b: &[T], c: &[T])
 
     let end = r.fold(0, |index, item| {
         unsafe {
-            core::ptr::copy((&item as *const T::SimdType) as *const T, result_ptr.offset(index as isize), T::CHUNK_SIZE)
+            ptr::copy((&item as *const T::SimdType) as *const T, result_ptr.offset(index as isize), T::CHUNK_SIZE)
         };
         index + T::CHUNK_SIZE
     });
