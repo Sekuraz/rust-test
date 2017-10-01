@@ -12,6 +12,8 @@ use std::ops::{Index, IndexMut};
 
 use std::cmp::{PartialEq, Eq};
 
+use super::traits::*;
+
 /// A rust Matrix
 ///
 /// This is a row major matrix!
@@ -120,13 +122,6 @@ impl Matrix {
     }
 }
 
-pub trait IndexUnchecked<T> : Index<T> {
-    #[inline]
-    unsafe fn get_unchecked(&self, index: T) -> &Self::Output;
-
-    #[inline]
-    unsafe fn get_unchecked_mut(&mut self, index: T) -> &mut Self::Output;
-}
 
 impl IndexUnchecked<isize> for Matrix {
     #[inline]

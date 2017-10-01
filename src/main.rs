@@ -8,6 +8,8 @@
 
 #![feature(inclusive_range_syntax)]
 
+#![feature(asm)]
+
 #[macro_use]
 extern crate lazy_static;
 extern crate hwloc;
@@ -45,7 +47,7 @@ fn random_array() -> Vec<NumType>
 
 #[allow(unused)]
 fn main() {
-    let n = 128 * 16;
+    let n = 128 * 32;
 
     let a = Matrix::random(n, n);
     let b = Matrix::random(n, n);
@@ -55,22 +57,30 @@ fn main() {
     let b_t = TileMatrix::from(b.clone());
     let mut c_t = TileMatrix::from(c.clone());
 
+    #[allow(non_snake_case)]
+    let bT = TransposedMatrix::from(b.clone());
+
     rayon::initialize(rayon::Configuration::new());
 
-    //#[cfg(release)] // otherwise the output does not reflect runtime
+    #[cfg(release)] // otherwise the output does not reflect runtime
     PROFILER.lock().unwrap().start("/tmp/profile");
     for _ in 0..10 {
         //matmul::naive::mult(&a, &b, &mut c); c.reset();
 
         //matmul::naive_unchecked::mult(&a, &b, &mut c); c.reset();
+        //matmul::naive_iter::mult(&a, &bT, &mut c); c.reset();
         //matmul::naive_reordered::mult(&a, &b, &mut c); c.reset();
-        matmul::naive_simd::mult(&a, &b, &mut c); c.reset();
-        //matmul::naive_rayon::mult(&a, &b, &mut c); c.reset();
+//        matmul::naive_simd::mult(&a, &b, &mut c); c.reset();
+        matmul::naive_rayon::mult(&a, &b, &mut c); c.reset();
 
-        matmul::blocked::mult(&a_t, &b_t, &mut c_t); c_t.reset();
+//        matmul::tiled::mult(&a_t, &b_t, &mut c_t); c_t.reset();
+//        matmul::tiled_rayon::mult(&a_t, &b_t, &mut c_t); c_t.reset();
+
+//        matmul::blocked::mult(&a, &bT, &mut c); c.reset()
+        matmul::asm::mult(&a, &bT, &mut c); c.reset()
 
     }
-    //#[cfg(release)] // otherwise the output does not reflect runtime
+    #[cfg(release)] // otherwise the output does not reflect runtime
     PROFILER.lock().unwrap().stop();
 
     let t: &Matrix = &c_t[0];
@@ -85,18 +95,12 @@ fn main() {
     //let b = random_array();
     //let c = random_array();
 
-    /*
-    copy(&a, &mut res);
-    add(&mut res, &a, &b);
-    striad(&mut res, &a, &b, S);
-    vtriad(&mut res, &a, &b, &c);
-    */
-    /*
-    vtriad_itertools(&mut res, &a, &b, &c);
-    for i in 0..ARRAY_SIZE {
-        println!("{}: {} * {} + {} = {}", i, a[i], c[i], b[i], res[i]);
-    }
-    */
+
+//    copy(&a, &mut res);
+//    add(&mut res, &a, &b);
+//    striad(&mut res, &a, &b, S);
+//    vtriad(&mut res, &a, &b, &c);
+
     //vtriad_rayon(&mut res, &a, &b, &c);
 
     //vtriad_rayon(&mut res, &a, &b, &c);

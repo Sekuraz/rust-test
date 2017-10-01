@@ -1,5 +1,5 @@
 
-use matrix::Matrix;
+use super::standard::Matrix;
 
 use std;
 
@@ -36,7 +36,7 @@ use std::fmt;
 /// This struct only implements methods to create, alter and index itself. Operations have to be
 /// implemented somewhere else.
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TileMatrix {
     pub rows: usize,
     pub columns: usize,
@@ -48,7 +48,7 @@ pub struct TileMatrix {
 }
 
 impl TileMatrix {
-    const BLOCK_SIZE: usize = 128;
+    const BLOCK_SIZE: usize = 128; // best for naive_simd algorithm
 
     /// Create a new tiled matrix from the given parts
     pub fn new(blocks_right: usize, blocks_down: usize, data: Vec<Matrix>) -> Self {
@@ -281,7 +281,6 @@ impl From<Matrix> for TileMatrix {
             }
 
             Self::new_with_size(rows, columns, blocks_right, blocks_down, data)
-
         }
     }
 }
